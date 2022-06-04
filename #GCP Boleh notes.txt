@@ -1,0 +1,133 @@
+#GCP Boleh notes
+
+GCP Boleh Notes
+
+bq query --use_legacy_sql=false \
+'SELECT
+   word
+ FROM
+   `bigquery-public-data`.samples.shakespeare
+ WHERE
+   word = "huzzah"'
+
+
+curl -LO http://www.ssa.gov/OACT/babynames/names.zip
+
+bq load babynames.names2010 yob2010.txt name:string,gender:string,count:integer
+
+bq ls babynames
+
+bq show babynames.names2010
+
+bq query "SELECT name,count FROM babynames.names2010 WHERE gender = 'F' ORDER BY count DESC LIMIT 5"
+
+bq query "SELECT name,count FROM babynames.names2010 WHERE gender = 'M' ORDER BY count ASC LIMIT 5"
+
+
+
+create or replace TABLE ecommerce.products AS 
+SELECT
+*
+FROM
+`data-to-insights.ecommerce.products`
+
+
+
+# pull what sold on 08/01/2017
+CREATE OR REPLACE TABLE ecommerce.sales_by_sku_20170801 AS
+SELECT DISTINCT
+  productSKU,
+  SUM(IFNULL(productQuantity,0)) AS total_ordered
+FROM
+  `data-to-insights.ecommerce.all_sessions_raw`
+WHERE date = '20170801'
+GROUP BY productSKU
+ORDER BY total_ordered DESC #462 skus sold
+
+
+SELECT * FROM ecommerce.sales_by_sku_20170801
+UNION ALL
+SELECT * FROM ecommerce.sales_by_sku_20170802
+
+Note: The difference between a UNION and UNION ALL is that a UNION will not include duplicate records.
+
+SELECT * FROM `ecommerce.sales_by_sku_2017*`
+
+SELECT * FROM `ecommerce.sales_by_sku_2017*`
+WHERE _TABLE_SUFFIX = '0802'
+
+
+Overview
+BigQuery is Google's fully managed, NoOps, low cost analytics database. With BigQuery you can query terabytes and terabytes of data without having any infrastructure to manage or needing a database administrator. BigQuery uses SQL and can take advantage of the pay-as-you-go model. BigQuery allows you to focus on analyzing data to find meaningful insights.
+
+
+
+Instead of scanning the entire dataset and filtering on a date field like we did in the earlier queries, we will now setup a date-partitioned table. This will allow us to completely ignore scanning records in certain partitions if they are irrelevant to our query.
+
+
+
+
+#standardSQL
+ CREATE OR REPLACE TABLE ecommerce.partition_by_day
+ PARTITION BY date_formatted
+ OPTIONS(
+   description="a table partitioned by date"
+ ) AS
+ SELECT DISTINCT
+ PARSE_DATE("%Y%m%d", date) AS date_formatted,
+ fullvisitorId
+ FROM `data-to-insights.ecommerce.all_sessions_raw`
+
+
+ Creating an auto-expiring partitioned table
+Auto-expiring partitioned tables are used to comply with data privacy statutes, and can be used to avoid unnecessary storage (which you'll be charged for in a production environment). If you want to create a rolling window of data, add an expiration date so the partition disappears after you're finished using it.
+
+
+#standardSQL
+ SELECT
+   DATE(CAST(year AS INT64), CAST(mo AS INT64), CAST(da AS INT64)) AS date,
+   (SELECT ANY_VALUE(name) FROM `bigquery-public-data.noaa_gsod.stations` AS stations
+    WHERE stations.usaf = stn) AS station_name,  -- Stations may have multiple names
+   prcp
+ FROM `bigquery-public-data.noaa_gsod.gsod*` AS weather
+ WHERE prcp < 99.9  -- Filter unknown values
+   AND prcp > 0      -- Filter stations/days with no precipitation
+   AND _TABLE_SUFFIX >= '2018'
+ ORDER BY date DESC -- Where has it rained/snowed recently
+ LIMIT 10
+
+
+ -- with partition expiration
+ CREATE OR REPLACE TABLE ecommerce.days_with_rain
+ PARTITION BY date
+ OPTIONS (
+   partition_expiration_days=60,
+   description="weather stations with precipitation, partitioned by day"
+ ) AS
+ SELECT
+   DATE(CAST(year AS INT64), CAST(mo AS INT64), CAST(da AS INT64)) AS date,
+   (SELECT ANY_VALUE(name) FROM `bigquery-public-data.noaa_gsod.stations` AS stations
+    WHERE stations.usaf = stn) AS station_name,  -- Stations may have multiple names
+   prcp
+ FROM `bigquery-public-data.noaa_gsod.gsod*` AS weather
+ WHERE prcp < 99.9  -- Filter unknown values
+   AND prcp > 0      -- Filter stations/days with no precipitation
+   AND _TABLE_SUFFIX >= '2018'
+
+
+To confirm you are only storing data from 60 days in the past up until today, run the DATE_DIFF query to get the age of your partitions, which are set to expire after 60 days.
+
+
+#standardSQL
+# avg monthly precipitation
+SELECT
+  AVG(prcp) AS average,
+  station_name,
+  date,
+  CURRENT_DATE() AS today,
+  DATE_DIFF(CURRENT_DATE(), date, DAY) AS partition_age,
+  EXTRACT(MONTH FROM date) AS month
+FROM ecommerce.days_with_rain
+WHERE station_name = 'WAKAYAMA' #Japan
+GROUP BY station_name, date, today, month, partition_age
+ORDER BY date DESC; # most recent days first
