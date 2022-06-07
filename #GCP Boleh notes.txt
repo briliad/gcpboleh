@@ -1194,6 +1194,21 @@ https://console.cloud.google.com/bigquery?p=bigquery-public-data&d=covid19_ecdc&
 
 bq show --format=prettyjson qwiklabs-gcp-04-3d57a9fd2587:covid_294.oxford_policy_tracker_744 | jq '.schema.fields' 
 
+CREATE OR REPLACE TABLE covid_432.oxford_policy_tracker_542
+ PARTITION BY date
+ OPTIONS (
+   partition_expiration_days=360,
+   description="govt policy tracker"
+ ) AS
+ SELECT
+   * 
+ FROM
+   `bigquery-public-data`.covid19_govt_response.oxford_policy_tracker
+ WHERE
+   (alpha_3_code!="GBR") AND (alpha_3_code!="BRA") AND ( alpha_3_code!="CAN") AND (alpha_3_code!="USA")
+
+
+
 [
  {
     "mode": "NULLABLE",
@@ -1238,7 +1253,7 @@ bq show --format=prettyjson qwiklabs-gcp-04-3d57a9fd2587:covid_294.oxford_policy
         "type": "FLOAT"
       }
     ],
-    "mode": "REPEATED",
+    "mode": "NULLABLE",
     "name": "mobility",
     "type": "RECORD"
   }
@@ -1255,12 +1270,77 @@ https://www.google.com/covid19/mobility/
 
 curl -LO https://opendata.ecdc.europa.eu/covid19/nationalcasedeath_eueea_daily_ei/csv/data.csv
 
-bq load covid_294.popdata data.csv dateRep:string,day,month:integer,year:integer,cases:integer,deaths:integer,countries:string,geoID:string,countryterritoryCode:string,popData2020:integer,continentExp:string
+bq load covid_432.popdata data.csv dateRep:string,day:integer,month:integer,year:integer,cases:integer,deaths:integer,countries:string,geoID:string,countryterritoryCode:string,popData2020:integer,continentExp:string
 
-bq ls covid_294
+bq ls covid_432
 
-bq show covid_294.popdata
+bq show covid_432.popdata
 
 bq query "SELECT name,count FROM babynames.names2010 WHERE gender = 'F' ORDER BY count DESC LIMIT 5"
 
 bq query "SELECT name,count FROM babynames.names2010 WHERE gender = 'M' ORDER BY count ASC LIMIT 5"
+
+
+UPDATE covid_432.oxford_policy_tracker_542 x
+SET x.population = y.popData2020
+FROM (SELECT DISTINCT countryterritoryCode,popData2020 FROM covid_432.popdata) AS y
+WHERE x.alpha_3_code = y.countryterritoryCode
+
+https://console.cloud.google.com/bigquery?p=bigquery-public-data&d=census_bureau_international&page=dataset
+
+
+area
+
+UPDATE covid_432.oxford_policy_tracker_542 x
+SET x.country_area = y.country_area
+FROM `bigquery-public-data`.census_bureau_international.country_names_area y
+WHERE x.country_name = y.country_name
+
+https://console.cloud.google.com/bigquery?p=bigquery-public-data&d=covid19_google_mobility&page=dataset
+
+
+
+UPDATE covid_432.oxford_policy_tracker_542 x
+SET x.mobility.avg_retail = y.avg_retail,
+x.mobility.avg_grocery = y.avg_grocery,
+x.mobility.avg_parks = y.avg_parks,
+x.mobility.avg_transit = y.avg_transit,
+x.mobility.avg_workplace = y.avg_workplace,
+x.mobility.avg_residential = y.avg_residential
+FROM  (SELECT country_region, 
+      AVG(retail_and_recreation_percent_change_from_baseline) as avg_retail,
+      AVG(grocery_and_pharmacy_percent_change_from_baseline)  as avg_grocery,
+      AVG(parks_percent_change_from_baseline) as avg_parks,
+      AVG(transit_stations_percent_change_from_baseline) as avg_transit,
+      AVG( workplaces_percent_change_from_baseline ) as avg_workplace,
+      AVG( residential_percent_change_from_baseline)  as avg_residential
+      FROM `bigquery-public-data.covid19_google_mobility.mobility_report`
+      GROUP BY country_region) AS y
+WHERE x.country_name = y.country_region
+
+
+
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+WRONG ANSWER - but useful for other cases
+UPDATE covid_432.oxford_policy_tracker_542 x
+SET mobility =ARRAY(SELECT AS STRUCT y.avg_retail,y.avg_grocery,y.avg_parks,y.avg_transit,y.avg_workplace,y.avg_residential)
+FROM  (SELECT country_region, date,
+      AVG(retail_and_recreation_percent_change_from_baseline) as avg_retail,
+      AVG(grocery_and_pharmacy_percent_change_from_baseline)  as avg_grocery,
+      AVG(parks_percent_change_from_baseline) as avg_parks,
+      AVG(transit_stations_percent_change_from_baseline) as avg_transit,
+      AVG( workplaces_percent_change_from_baseline ) as avg_workplace,
+      AVG( residential_percent_change_from_baseline)  as avg_residential
+      FROM `bigquery-public-data.covid19_google_mobility.mobility_report`
+      GROUP BY country_region, date) AS y
+WHERE x.country_name = y.country_region
+AND x.date=y.date
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+
+SELECT DISTINCT country_name FROM `qwiklabs-gcp-01-0445cd22f845.covid_432.oxford_policy_tracker_542` x
+WHERE x.population IS NULL
+UNION ALL
+SELECT DISTINCT country_name FROM `qwiklabs-gcp-01-0445cd22f845.covid_432.oxford_policy_tracker_542` y
+WHERE y.country_area IS NULL
+ORDER BY country_name
