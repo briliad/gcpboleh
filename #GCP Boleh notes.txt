@@ -1344,3 +1344,8 @@ UNION ALL
 SELECT DISTINCT country_name FROM `qwiklabs-gcp-01-0445cd22f845.covid_432.oxford_policy_tracker_542` y
 WHERE y.country_area IS NULL
 ORDER BY country_name
+
+
+
+
+bq query "SELECT DISTINCT country_territory_code, pop_data_2019 FROM `bigquery-public-data.covid19_ecdc.covid_19_geographic_distribution_worldwide`" > pop_data_2019.txt
